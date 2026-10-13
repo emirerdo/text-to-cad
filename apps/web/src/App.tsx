@@ -13,6 +13,7 @@ import { browserClipboard, browserClipboardSupportsImages } from './host/clipboa
 import { createWebPromptContext } from './host/promptContext';
 import { useViewerLinks } from './host/viewerLinks.js';
 import ViewerAppearance from './client/components/workbench/ViewerAppearance.jsx';
+import { PrintButton } from './PrintButton';
 import { readDefaultFileParam, readFileParam, resolveFileParam, writeFileParam } from './client/workbench/fileParam.js';
 import { applyColorSchemeToDocument, resolveColorSchemeMode } from './client/ui/colorScheme.js';
 
@@ -126,6 +127,7 @@ export default function App({ client, server, tabStore, notice = null }: { clien
     <CadViewer client={client} host={host} tabStore={tabStore} live={live} file={file} onShow={show} onShown={shown}
       library={library} onThumbnail={client.keepThumbnail} appSettings={appSettings} features={features}
       update={updateNotice ? <UpdateButton notice={updateNotice} copy={prompt => browserClipboard.writeText(prompt)} onLink={openTab} /> : null}
+      fullSize={file ? <PrintButton file={file} origin={client.origin} /> : null}
       displayActions={<ViewerAppearance colorSchemePreference={appearance.preference} resolvedColorSchemeMode={appearance.colorScheme} onColorSchemePreferenceChange={changeColorScheme} />} />
   </div></div>;
 }

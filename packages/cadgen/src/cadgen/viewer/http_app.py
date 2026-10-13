@@ -523,6 +523,10 @@ class CadApp:
                     response.send_json(200, features.read())
                 elif pathname == "/__cad/version":
                     response.send_json(200, self._version())
+                elif pathname == "/__cad/print":
+                    # The open file's print projects, from the workspace's print command (``print_hook.py``).
+                    from .print_hook import projects
+                    response.send_json(200, projects(absolute_path(query.get("path"))))
                 else:
                     # An unrecognised /__cad/* path is a bad API call, not a
                     # page. Falling through to the SPA answered typo'd and
@@ -591,6 +595,16 @@ class CadApp:
                         response.send_json(404, {"ok": False, "error": "That file is no longer there."})
                         return
                     response.send_empty(204)
+                elif pathname == "/__cad/print":
+                    # Build one print project for the open file and open it in the slicer (``print_hook.py``).
+                    from .print_hook import open_project
+                    if int(request.headers.get("content-length") or 0) > 8192:
+                        response.send_empty(413, [("connection", "close")])
+                        return
+                    payload = json.loads(request.body())
+                    if type(payload) is not dict or set(payload) != {"path", "file"}:
+                        raise ValueError("Print requires a path and a file")
+                    response.send_json(200, open_project(absolute_path(payload["path"]), str(payload["file"])))
                 elif pathname == "/__cad/clipboard":
                     from .clipboard import MAX_PNG_BYTES, copy_png
                     if int(request.headers.get("content-length") or 0) > MAX_PNG_BYTES:
