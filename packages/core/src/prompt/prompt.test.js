@@ -32,6 +32,16 @@ test('a reference names its ids as a person reads them: each selector, a range f
   assert.deepEqual(promptReferenceIds({ ...range, target: { kind: 'whole-resource' } }), []);
 });
 
+test('a mesh feature is told in full, named short, and needs a summary', () => {
+  const feature = { resource: { kind: 'workspace-file', path: '/work/mini.stl' }, target: { kind: 'mesh-feature', feature: 'face', summary: '1 face · mini · /work/mini.stl\n  plane, normal +Z, z = 14.00' }, label: '1 face · mini · plane z = 14.00' };
+  assert.equal(formatPromptReference(feature), feature.target.summary);
+  assert.deepEqual(promptReferenceIds(feature), ['1 face · mini · plane z = 14.00']);
+  const file = { resource: { kind: 'workspace-file', path: '/work/design.urdf' }, target: { kind: 'whole-resource' } };
+  assert.equal(formatPromptMessage(createPromptContext([textPart('Lower this.'), referencePart(file, 'file'), referencePart(feature, 'r')])),
+    `Lower this.\n\nFile: /work/design.urdf\nReferences:\n${feature.target.summary}`);
+  assert.throws(() => referencePart({ ...feature, target: { kind: 'mesh-feature', feature: 'face', summary: '' } }), /summary/);
+});
+
 test('invalid bundles fail before delivery, including dangling relationships and unknown targets', () => {
   assert.throws(() => createPromptContext([textPart('a'), textPart('b')]), /unique/);
   assert.throws(() => createPromptContext([{ id: 'i', kind: 'attachment', name: 'a.pdf', mimeType: 'application/pdf', content: new Blob(), about: ['missing'] }]), /absent reference/);

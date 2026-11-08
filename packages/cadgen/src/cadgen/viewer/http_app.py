@@ -30,6 +30,7 @@ import sys
 import threading
 from pathlib import Path
 
+from . import agent_context
 from . import reload as dev_reload
 from .backend import absolute_path, asset_path
 from .cadgen_ops import CadgenOps
@@ -74,7 +75,8 @@ TESS_CACHE_PROBE_PATH = "/__tess_cache/probe"
 # after it reloads; interrupting a compile would cost a build, which is why
 # every other route, `POST /__cad/artifact` above all, is counted.
 _UNCOUNTED_ROUTES = frozenset({"/__cad/server", "/__cad/preview", "/__cad/surfaces", "/__cad/surfaces/cancel",
-                               "/__cad/analytics", "/__cad/analytics/activity", "/__cad/version"})
+                               "/__cad/analytics", "/__cad/analytics/activity", "/__cad/version",
+                               "/__cad/context", "/__cad/context/read"})
 
 
 def hostname_only(host_header) -> str:
@@ -272,6 +274,8 @@ class CadApp:
         self.drawings = DrawingRenders(on_crash=lambda error: self._crashed(error, bugs_only=True))
         # What a watched build saves, its catalog row computed before a read asks (``warm.py``).
         self.catalog_warm = CatalogWarmer()
+        # What is selected in each tab, until the person's agent asks for it (``agent_context.py``).
+        self.agent_context = agent_context.AgentContext()
         self.start = to_posix_path(os.path.abspath(start if start is not None else _working_folder()))
         # Whether this computer has a file chooser for the home's Open (``POST /__cad/pick``).
         self.pick = available()
@@ -339,6 +343,7 @@ class CadApp:
             "pick": self.pick,
             "port": self.port,
             "pid": os.getpid(),
+            **({"agentContext": True} if agent_context.enabled() else {}),
         }
 
     def read_catalog(self, file=None) -> dict:
@@ -527,6 +532,8 @@ class CadApp:
                     # The open file's print projects, from the workspace's print command (``print_hook.py``).
                     from .print_hook import projects
                     response.send_json(200, projects(absolute_path(query.get("path"))))
+                elif pathname == "/__cad/context" and agent_context.enabled():
+                    response.send_json(200, self.agent_context.status(str(query.get("tab") or "")))
                 else:
                     # An unrecognised /__cad/* path is a bad API call, not a
                     # page. Falling through to the SPA answered typo'd and
@@ -605,6 +612,15 @@ class CadApp:
                     if type(payload) is not dict or set(payload) != {"path", "file"}:
                         raise ValueError("Print requires a path and a file")
                     response.send_json(200, open_project(absolute_path(payload["path"]), str(payload["file"])))
+                elif pathname in ("/__cad/context", "/__cad/context/read") and agent_context.enabled():
+                    if int(request.headers.get("content-length") or 0) > agent_context.MAX_BODY_BYTES:
+                        response.send_empty(413, [("connection", "close")])
+                        return
+                    payload = json.loads(request.body())
+                    if pathname == "/__cad/context":
+                        response.send_json(200, self.agent_context.publish(*agent_context.publication(payload)))
+                    else:
+                        response.send_json(200, {"items": self.agent_context.read(*agent_context.reader(payload))})
                 elif pathname == "/__cad/clipboard":
                     from .clipboard import MAX_PNG_BYTES, copy_png
                     if int(request.headers.get("content-length") or 0) > MAX_PNG_BYTES:

@@ -1,4 +1,5 @@
 import { createSurfaceLook } from "../viewer/surfaceLook.js";
+import { scheduleRuntimeRaycastBvh } from "../viewer/raycastBvh.js";
 import { buildMeshObjects } from "./meshObjects.js";
 
 function boundsOf(THREE, objects) {
@@ -26,6 +27,7 @@ function boundsOf(THREE, objects) {
 export function createMeshScene(THREE, objects) {
   const root = new THREE.Group();
   root.name = "mesh-document";
+  const meshes = [];
   const materials = objects.map((object) => {
     const material = new THREE.MeshPhysicalMaterial({ color: object.color || 0xffffff, side: THREE.DoubleSide });
     material.userData.cadSourceColor = Boolean(object.color);
@@ -35,8 +37,12 @@ export function createMeshScene(THREE, objects) {
     // Where "Color by part" deals this object its palette colour.
     mesh.userData.cadFillIndex = object.paletteIndex;
     root.add(mesh);
+    meshes.push(mesh);
     return material;
   });
+  // A pick walks triangles; the first ray builds their tree in the background.
+  scheduleRuntimeRaycastBvh({ displayRecords: meshes.map(mesh => ({ mesh })) }, { deferUntilRaycast: true });
+  const raycaster = new THREE.Raycaster();
   const look = createSurfaceLook(THREE, root);
   const bounds = boundsOf(THREE, objects);
   let disposed = false;
@@ -48,6 +54,14 @@ export function createMeshScene(THREE, objects) {
     // Nothing here was authored, so Render is a look like any other: the studio's
     // surface over the same colours, never a finish "kept".
     setSurfaceLook(next) { if (!disposed) look.apply(next ? { ...next, authored: false } : null); },
+    // The first surface under the ray, by the triangle it struck.
+    pick(ray) {
+      if (disposed) return null;
+      root.updateMatrixWorld();
+      raycaster.ray.copy(ray);
+      const hit = raycaster.intersectObjects(meshes, false)[0];
+      return hit ? { id: hit.object.uuid, point: hit.point, object: hit.object, faceIndex: hit.faceIndex } : null;
+    },
     dispose() {
       if (disposed) return;
       disposed = true;

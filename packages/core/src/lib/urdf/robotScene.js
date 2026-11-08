@@ -415,7 +415,7 @@ export function createRobotScene(THREE, { description, parts }) {
       let owner = hit.object;
       while (owner && !(owner.isGroup && owner.userData.linkName)) owner = owner.parent;
       const linkName = owner?.userData.linkName || "";
-      return { id: componentId || `link:${linkName}`, kind: componentId ? "component" : "link", linkName, componentId, point: hit.point };
+      return { id: componentId || `link:${linkName}`, kind: componentId ? "component" : "link", linkName, componentId, point: hit.point, object: hit.object, faceIndex: hit.faceIndex };
     },
     dispose() {
       if (disposed) return;

@@ -8,12 +8,16 @@ import { srdfGroupNamesByLink } from "@text-to-cad/core/lib/urdf/parseSrdf.js";
 import { VIEWER_SCENE_SCALE } from "@text-to-cad/core/lib/viewer/sceneScale.js";
 import RendererShell from "../kit/shell/RendererShell.jsx";
 import { readFileView } from "../kit/shell/fileView.js";
-import { useRendererShell } from "../kit/shell/useRendererShell.js";
+import { SHELL_TOOL, useRendererShell } from "../kit/shell/useRendererShell.js";
 import { failureAlert } from "../kit/status/loadAlerts.js";
 import JointHandleOverlay from "../kit/tools/pose/JointHandleOverlay.jsx";
 import ToolPanel from "../kit/tools/ToolPanel.jsx";
 import { MotionResetButton, PositionToolIcon, positionValuesAreDefault } from "../kit/inspector/kinematicsControls.jsx";
 import { PointerPick } from "../kit/tools/select/usePointerPick.js";
+import FeaturePick, { useFeaturePicks } from "../kit/tools/feature-pick/FeaturePick.jsx";
+import { FEATURE_MODE, FeatureModeIcon, FeatureModeMenu } from "../kit/tools/feature-pick/featureModes.jsx";
+import { createToolModes } from "../kit/tools/toolModes.js";
+import { useViewerHost } from "../../host/context.js";
 import { useDeclinedSelectReference, useWorkspaceDocument, workspaceLoadAlert } from "../workspace/useWorkspaceDocument.js";
 import PositionControls from "./PositionControls.jsx";
 import LinksSection from "./LinksSection.jsx";
@@ -30,6 +34,13 @@ const SELECT_ICON = <MousePointer2 className="size-3" strokeWidth={2} aria-hidde
 // Select's own panel, which a person can close (`LinksSection.jsx`'s tree). A robot is never a
 // single part: like an assembly's, its tree starts open, except on a phone.
 const LINKS_PANEL = Object.freeze({ id: "tree", label: "Links", startsClosed: false });
+// With an agent to tell, Select picks faces, edges and points on the meshes, and Draw marks a region.
+const AGENT_TOOL_MODES = createToolModes({
+  defaultMode: ROBOT_TOOL.SELECT,
+  modes: { [ROBOT_TOOL.POSE]: {}, [ROBOT_TOOL.SELECT]: {}, [SHELL_TOOL.DRAW]: { toggles: true } }
+});
+const NO_PARTS = Object.freeze([]);
+const URDF_UNITS_TO_MM = 1000;
 
 function RobotSurface({ view, data }) {
   const document = useWorkspaceDocument({ view, data });
@@ -86,6 +97,39 @@ function RobotSurface({ view, data }) {
   const selection = useLinkSelection({ scene, requestRender: requestHighlightFrame });
   const selectionRef = useRef(selection);
   selectionRef.current = selection;
+
+  // ---- what a person points at, told to their agent ------------------------------------------
+  const agent = Boolean(useViewerHost().agentContext);
+  const meshFile = String(document.entry?.file || "").trim() || document.modelKey;
+  const describePart = useCallback((hit) => {
+    const part = robotRef.current?.parts?.find(candidate => candidate.id === hit.componentId);
+    const path = part?.filename ? resolveLocalAssetFileRef(meshFile, part.filename) : "";
+    return path ? { name: String(part.componentName || part.label || part.linkName), path } : null;
+  }, [meshFile]);
+  const { selectedLinkNames, selectedComponentIds } = selection;
+  // What the tree (or Parts) has selected, as whole parts.
+  const treeParts = useMemo(() => {
+    if (!agent || !scene) return NO_PARTS;
+    const chosen = (robot?.parts || []).filter(part => (selectedLinkNames.length ? selectedLinkNames.includes(part.linkName) : selectedComponentIds.includes(part.id)));
+    if (!chosen.length) return NO_PARTS;
+    const meshes = new Map();
+    scene.object3D.traverse((object) => { if (object.isMesh && object.userData.componentId) meshes.set(object.userData.componentId, object); });
+    return chosen.flatMap((part) => {
+      const mesh = meshes.get(part.id);
+      const described = mesh ? describePart({ componentId: part.id }) : null;
+      if (!described) return [];
+      if (!mesh.geometry.boundingBox) mesh.geometry.computeBoundingBox();
+      const toRoot = new THREE.Matrix4().copy(scene.object3D.matrixWorld).invert().multiply(mesh.matrixWorld);
+      return [{ kind: "part", part: { ...described, bbox: { min: mesh.geometry.boundingBox.min.toArray(), max: mesh.geometry.boundingBox.max.toArray() },
+        unitsToMm: new THREE.Vector3().setFromMatrixColumn(toRoot, 0).length() * URDF_UNITS_TO_MM } }];
+    });
+  }, [agent, scene, robot, selectedLinkNames, selectedComponentIds, describePart]);
+  const picks = useFeaturePicks({ scene, extra: treeParts });
+  const picksRef = useRef(picks);
+  picksRef.current = picks;
+  const clearEverything = useCallback(() => { picksRef.current.clear(); selectionRef.current.clear(); }, []);
+  const clearTreeUnlessAdding = useCallback((multiSelect) => { if (!multiSelect) selectionRef.current.clear(); }, []);
+
   const live = useMemo(() => ({
     declined: ROBOT_DECLINED_LIVE_COMMANDS,
     commands: { clearSelection: () => selectionRef.current.clear() },
@@ -96,10 +140,15 @@ function RobotSurface({ view, data }) {
     })
   }), []);
   const escape = useMemo(() => ({
-    active: selection.active,
+    active: selection.active || picks.active,
     // Escape clears the selection.
-    handle: () => { if (!selectionRef.current.active) return false; selectionRef.current.clear(); return true; }
-  }), [selection.active]);
+    handle: () => {
+      if (!selectionRef.current.active && !picksRef.current.active) return false;
+      selectionRef.current.clear();
+      picksRef.current.clear();
+      return true;
+    }
+  }), [selection.active, picks.active]);
 
   const requestVisibilityRender = useCallback(() => {
     shellRef.current?.requestRender();
@@ -115,7 +164,7 @@ function RobotSurface({ view, data }) {
 
   const shell = useRendererShell({
     view, services: document.services, resource: document.resource, modelKey: document.modelKey, revisionKey: robot?.revision || "",
-    features: EDGELESS_VIEW_FEATURES, toolModes: ROBOT_TOOL_MODES, previewable: true, scene,
+    features: EDGELESS_VIEW_FEATURES, toolModes: agent ? AGENT_TOOL_MODES : ROBOT_TOOL_MODES, previewable: true, scene,
     sceneScaleMode: VIEWER_SCENE_SCALE.URDF,
     load: { busy: (loaded.busy && !scene) || (Boolean(robot) && !scene), updating: loaded.busy && Boolean(scene), progress: loaded.progress, alert: loadAlert },
     live, escape, rendererState
@@ -170,6 +219,8 @@ function RobotSurface({ view, data }) {
   useEffect(() => { if (robot && !posable && toolMode === ROBOT_TOOL.POSE) selectTool(ROBOT_TOOL.SELECT); }, [robot, posable, toolMode, selectTool]);
   // A selection exists only while Select is the tool: leaving it drops the selection.
   const clearSelection = selection.clear;
+  // Draw keeps what is picked: a mark on the model goes with the picks it is about.
+  useEffect(() => { if (toolMode !== ROBOT_TOOL.SELECT && toolMode !== SHELL_TOOL.DRAW) clearEverything(); }, [toolMode, clearEverything]);
   useEffect(() => { if (toolMode !== ROBOT_TOOL.SELECT) clearSelection(); }, [toolMode, clearSelection]);
   const poseActive = !shell.previewing && posable && Boolean(scene) && toolMode === ROBOT_TOOL.POSE;
   const selectActive = !shell.previewing && Boolean(scene) && toolMode === ROBOT_TOOL.SELECT;
@@ -183,7 +234,11 @@ function RobotSurface({ view, data }) {
     selectLink: (name, options) => { selection.selectLink(name, options); if (name) toSelect(); }
   }), [selection, toSelect]);
   const pickSelection = selection.pick;
-  const handlePick = useCallback((hit, modifiers) => { pickSelection(hit, modifiers); if (hit) toSelect(); }, [pickSelection, toSelect]);
+  const handlePick = useCallback((hit, modifiers) => {
+    if (!modifiers.multiSelect) picksRef.current.clear();
+    pickSelection(hit, modifiers);
+    if (hit) toSelect();
+  }, [pickSelection, toSelect]);
 
   // A mesh the description names, by the absolute path the host opens. It resolves against the
   // opened file exactly as the mesh loader does (an SRDF's URDF is always beside it); a
@@ -202,16 +257,18 @@ function RobotSurface({ view, data }) {
   // known, and it is shown, idle, meanwhile.
   const tools = [
     // Links closes by its X; a press on Select while it is the tool opens it again.
-    shell.tools.own({ id: ROBOT_TOOL.SELECT, label: "Select", icon: SELECT_ICON, panel: LINKS_PANEL }),
+    shell.tools.own({ id: ROBOT_TOOL.SELECT, label: "Select", icon: agent ? <FeatureModeIcon mode={picks.mode} className="size-3.5" aria-hidden="true" /> : SELECT_ICON, panel: LINKS_PANEL }),
     !robot || posable ? shell.tools.own({ id: ROBOT_TOOL.POSE, label: "Position", icon: <PositionToolIcon custom={poseCustom} />,
       // Its panel is in the tool stack for as long as it is the tool.
-      onSelect: () => { if (!poseActive) selectTool(ROBOT_TOOL.POSE); } }) : null
+      onSelect: () => { if (!poseActive) selectTool(ROBOT_TOOL.POSE); } }) : null,
+    agent ? shell.tools.draw : null
   ].filter(Boolean);
   // The tool stack: Select's Links and Reference (and an SDF's own metadata), then Position's joints.
   const linksShown = !shell.previewing && toolMode === ROBOT_TOOL.SELECT;
   const toolPanels = <>
     <LinksSection key={modelKey} active={linksShown} description={robot?.description || null} components={robot?.components}
-      parts={robot?.parts} hiddenPartIds={hiddenPartIds} onVisibilityChange={changeVisibility} selection={treeSelection} groupNamesByLink={groupNamesByLink} meshPath={meshPath} onOpenFile={view.onOpenFile} />
+      parts={robot?.parts} hiddenPartIds={hiddenPartIds} onVisibilityChange={changeVisibility} selection={treeSelection} groupNamesByLink={groupNamesByLink} meshPath={meshPath} onOpenFile={view.onOpenFile}
+      headerAction={agent ? <FeatureModeMenu mode={picks.mode} onModeChange={picks.setMode} parts /> : null} />
     {kind === "sdf" ? <ToolPanel id="sdf" title="SDF" label="SDF" fit="details" defaultCollapsed hidden={!linksShown}>
       <SdfSection info={robot?.description?.sdf || null} movableJointCount={pose?.joints.length || 0} />
     </ToolPanel> : null}
@@ -223,10 +280,13 @@ function RobotSurface({ view, data }) {
     </ToolPanel> : null}
   </>;
 
-  return <RendererShell shell={shell} tools={tools} toolPanels={toolPanels}
+  const picksFeatures = agent && picks.mode !== FEATURE_MODE.PARTS;
+  return <RendererShell shell={shell} tools={tools} toolPanels={toolPanels} references={agent ? picks.references : null} onClearReferences={clearEverything}
     viewportOverlay={viewport => <>
       {poseActive ? <JointHandleOverlay handlesRef={handlesRef} layoutSeamRef={handleLayoutRef} {...viewport} /> : null}
-      <PointerPick viewport={viewport} scene={scene} enabled={selectActive} onPick={handlePick} onHover={selection.hoverHit} />
+      <PointerPick viewport={viewport} scene={scene} enabled={selectActive && !picksFeatures} onPick={handlePick} onHover={selection.hoverHit} />
+      {agent ? <FeaturePick viewport={viewport} scene={scene} enabled={selectActive && picksFeatures} picks={picks} describePart={describePart}
+        rootUnitsToMm={URDF_UNITS_TO_MM} requestFrame={requestHighlightFrame} onBeforePick={clearTreeUnlessAdding} /> : null}
     </>} />;
 }
 

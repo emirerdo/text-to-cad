@@ -11,6 +11,7 @@ import { useFeatures } from '@text-to-cad/ui/features';
 import { UpdateButton, useUpdateNotice, type UpdateNotice } from '@text-to-cad/ui/update';
 import { browserClipboard, browserClipboardSupportsImages } from './host/clipboard';
 import { createWebPromptContext } from './host/promptContext';
+import { createAgentContext } from './host/agentContext';
 import { useViewerLinks } from './host/viewerLinks.js';
 import ViewerAppearance from './client/components/workbench/ViewerAppearance.jsx';
 import { PrintButton } from './PrintButton';
@@ -51,6 +52,8 @@ export default function App({ client, server, tabStore, notice = null }: { clien
     reveal: path => client.reveal(path) }), [server.platform, client]);
   // A copied Quick Edit's sketch, saved by the server beside it on this machine.
   const attachments = useMemo(() => createHttpAttachmentStore({ origin: client.origin }), [client]);
+  // What is selected here, for the person's agent (where this server offers it: `CADGEN_AGENT_CONTEXT`).
+  const agentContext = useMemo(() => (server.agentContext ? createAgentContext({ origin: client.origin, attachments }) : undefined), [server.agentContext, client, attachments]);
   // The view on screen, for the library's pictures of what was opened.
   const live = useMemo(() => createLiveRegistry(), []);
   const links = useViewerLinks();
@@ -118,11 +121,11 @@ export default function App({ client, server, tabStore, notice = null }: { clien
     return () => { window.removeEventListener('pointerdown', touched, true); window.removeEventListener('keydown', touched, true); };
   }, [client]);
   const host = useMemo<Omit<ViewerHost, 'navigation'>>(() => ({
-    files: source, fileActions, clipboard: browserClipboard, promptContext, attachments, links,
+    files: source, fileActions, clipboard: browserClipboard, promptContext, attachments, links, agentContext,
     // A Quick Edit copied, counted by this Viewer's server for its telemetry, as a touch is.
     usage: { used: feature => { if (feature === 'quickEdit') client.reportActivity({ quickEdit: true }); } },
     environment: { colorScheme: appearance.colorScheme, platform: keyboardPlatform() },
-  }), [client, source, fileActions, promptContext, attachments, links, appearance.colorScheme]);
+  }), [client, source, fileActions, promptContext, attachments, agentContext, links, appearance.colorScheme]);
   return <div className="flex h-svh flex-col overflow-hidden"><div className="min-h-0 flex-1">
     <CadViewer client={client} host={host} tabStore={tabStore} live={live} file={file} onShow={show} onShown={shown}
       library={library} onThumbnail={client.keepThumbnail} appSettings={appSettings} features={features}

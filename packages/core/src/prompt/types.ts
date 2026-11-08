@@ -7,7 +7,9 @@ export interface TextPosition { line: number; character: number }
 export type ReferenceTarget =
   | { kind: 'whole-resource' }
   | { kind: 'text-range'; start: TextPosition; end: TextPosition }
-  | { kind: 'cad-selector'; selectors: readonly string[] };
+  | { kind: 'cad-selector'; selectors: readonly string[] }
+  /** A feature picked on a triangle mesh, which has no selector grammar: `summary` is what was measured on it. */
+  | { kind: 'mesh-feature'; feature: 'face' | 'edge' | 'point' | 'part'; summary: string };
 export interface PromptReference { resource: ResourceRef; target: ReferenceTarget; label?: string }
 export type PromptPart =
   | { id: string; kind: 'text'; text: string }

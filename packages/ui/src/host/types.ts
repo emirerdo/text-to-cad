@@ -45,6 +45,17 @@ export interface ViewerLinks {
    */
   open?(url: string): Promise<void>;
 }
+/**
+ * Where what is selected in the viewer waits for the person's agent, which reads it with their next
+ * message. Absent: a selection goes nowhere by itself, and a Quick Edit is copied.
+ */
+export interface AgentContextPort {
+  /** Say what is selected now; empty `text` says nothing is. `picture` is the view, taken only when `pictureKey` changes. */
+  publish(selection: { text: string; paths: readonly string[]; picture: (() => Promise<Blob>) | null; pictureKey: string; pictureName: string }): void;
+  /** Whether an agent has read what was last published. */
+  getDelivered(): boolean;
+  subscribe(listener: () => void): () => void;
+}
 export interface ViewerHost {
   files: FileSource;
   fileActions?: FileActions;
@@ -52,6 +63,7 @@ export interface ViewerHost {
   promptContext: PromptContextPort;
   /** Saves a copied prompt's picture where the prompt can name it. Absent: a copied prompt names none. */
   attachments?: AttachmentStore;
+  agentContext?: AgentContextPort;
   /**
    * Show a file, by its absolute path, in this view: a pick in the explorer, a renderer's link.
    * `home` shows the host's home in this view: its recent models, what it shows with no file. A

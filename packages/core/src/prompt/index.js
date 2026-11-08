@@ -29,6 +29,9 @@ export function validatePromptReference(reference) {
       const parsed = typeof selector === 'string' && selector === selector.trim() ? parseCadRefSelector(selector) : null;
       return parsed && parsed.selectorType !== 'opaque';
     }), 'invalid CAD selector');
+  } else if (target.kind === 'mesh-feature') {
+    requireValue(resource.kind === 'workspace-file', 'mesh features require a workspace file');
+    requireValue(typeof target.summary === 'string' && target.summary.length > 0, 'a mesh feature needs a summary');
   } else requireValue(target.kind === 'whole-resource', 'unknown reference target');
   return reference;
 }
@@ -83,6 +86,7 @@ export function textPart(text, id = 'text') { return { id, kind: 'text', text };
 export function promptReferenceIds(reference) {
   const { target } = reference;
   if (target.kind === 'cad-selector') return target.selectors.map(String);
+  if (target.kind === 'mesh-feature') return [reference.label || target.summary.split('\n')[0]];
   if (target.kind === 'text-range') {
     const { start, end } = target;
     return [reference.label || `${start.line + 1}:${start.character + 1}–${end.line + 1}:${end.character + 1}`];
@@ -93,6 +97,8 @@ export function promptReferenceIds(reference) {
 /** Keep machine identity structured; these strings are the portable human/prompt representation. */
 export function formatPromptReference(reference) {
   validatePromptReference(reference);
+  // A triangle mesh has no selector grammar: a picked feature is told by what was measured on it.
+  if (reference.target.kind === 'mesh-feature') return reference.target.summary;
   // A file by its absolute path, a URL as it is.
   const path = reference.resource.kind === 'url' ? reference.resource.url : reference.resource.path;
   requireValue(path.length > 0, 'a reference names its file or URL');

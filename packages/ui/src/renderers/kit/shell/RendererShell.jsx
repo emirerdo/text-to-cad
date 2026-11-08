@@ -330,7 +330,7 @@ export default function RendererShell({ shell, tools, playback = null, toolPanel
                   reload of the model. */}
               <ViewportTopRight notice={chromeHidden ? null : view.notice} belowStrip={!toolsHidden}>
                 {compact || !references || !quickEdit ? null : <QuickEdit key={frame.modelKey} className="self-stretch" hidden={chromeHidden}
-                  resource={frame.resource} references={references} sketch={sketch}
+                  resource={frame.resource} references={references} sketch={sketch} captureView={frame.captureView}
                   onCopy={copyAction} onEscape={frame.escape} onClear={clearQuickEdit} disabled={viewerLoading || !scene} />}
               </ViewportTopRight>
 

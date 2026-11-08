@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import { ArrowUp, Check, Copy, ListPlus, X } from "lucide-react";
 import { Button } from "@text-to-cad/ui/primitives/button";
 import { TooltipHint } from "@text-to-cad/ui/primitives/tooltip";
@@ -9,7 +9,7 @@ import { FLOATING_SURFACE_CLASS } from "../../../../lib/floatingSurface.js";
 import { capturePointer } from "../../../../lib/pointerCapture.js";
 import ResizeGrip from "../ResizeGrip.jsx";
 import { TOOL_PANEL_BUTTON_CLASS } from "../ToolPanel.jsx";
-import { copiedQuickEdit, createQuickEditContext, quickEditSelection, sketchName } from "./quickEditPrompt.js";
+import { agentSelection, copiedQuickEdit, createQuickEditContext, quickEditSelection, sketchName } from "./quickEditPrompt.js";
 
 const EMPTY = Object.freeze([]);
 // A press of the person's in this view leads the selection it made; an agent's selection (the live
@@ -19,6 +19,11 @@ const PICK_MS = 1500;
 // 15rem wide, its note growing with what is written.
 export const QUICK_EDIT_LIMITS = Object.freeze({ minWidth: 208, maxWidth: 640, minHeight: 56, maxHeight: 320 });
 const clamp = (value, min, max) => Math.min(max, Math.max(min, value));
+
+// A selection reaches the agent's context a moment after it settles, not on every keystroke.
+const AGENT_PUBLISH_MS = 250;
+const noSubscribe = () => () => {};
+const never = () => false;
 
 const failure = result => (result && (result.status === "failed" || result.status === "cancelled") ? result.message || "The prompt did not go." : "");
 
@@ -62,7 +67,7 @@ export function quickEditReferenceIds(selection) {
  *   sight with all it holds (the view is loading).
  */
 export default function QuickEdit({ resource, references = EMPTY, sketch = null, onCopy, onEscape, onClear, disabled = false,
-  hidden = false, className, style }) {
+  hidden = false, className, style, captureView = null }) {
   const host = useViewerHost();
   const destination = usePromptDestination();
   const [text, setText] = useState("");
@@ -78,8 +83,31 @@ export default function QuickEdit({ resource, references = EMPTY, sketch = null,
   const written = Boolean(text.trim());
   const open = written || attached;
 
+  // Where an agent can read it, what is picked is in its context from the moment it is picked: the
+  // person's next message carries it. (An Effect: this keeps an outside system in step.)
+  const agentContext = host.agentContext ?? null;
+  const delivered = useSyncExternalStore(agentContext?.subscribe ?? noSubscribe, agentContext?.getDelivered ?? never);
+  const [inkStrokes, setInkStrokes] = useState(0);
+  const noteRef = useRef(text);
+  noteRef.current = text;
+  const noteJustSent = useRef(false);
+  const pictureKey = `${referenceIds.join("\n")}|${sketching ? inkStrokes : ""}`;
+  useEffect(() => {
+    if (!agentContext) return undefined;
+    // Emptying the box of a note that has gone is not a new selection to tell.
+    if (noteJustSent.current) { noteJustSent.current = false; return undefined; }
+    const timer = setTimeout(() => {
+      agentContext.publish(agentSelection({ resource, references: selection, text, picture: attached ? captureView : null, pictureKey }));
+    }, AGENT_PUBLISH_MS);
+    return () => clearTimeout(timer);
+  }, [agentContext, resource, selection, text, attached, captureView, pictureKey]);
+  // A note that has gone is not said again with the next pick.
+  useEffect(() => { if (delivered && noteRef.current) { noteJustSent.current = true; setText(""); } }, [delivered]);
+
   // The person's presses: a stroke is under way while one is down, and a pick follows one in this view.
   const pressed = useRef(false);
+  const sketchingRef = useRef(sketching);
+  sketchingRef.current = sketching;
   const lastPress = useRef(-Infinity);
   useEffect(() => {
     const down = () => { pressed.current = true; };
@@ -87,6 +115,7 @@ export default function QuickEdit({ resource, references = EMPTY, sketch = null,
     // without being a pick to talk about — and the menu keeps the keyboard.
     const up = event => {
       pressed.current = false;
+      if (sketchingRef.current) setInkStrokes(strokes => strokes + 1);
       const view = root.current?.closest("[data-slot=cad-file-view]");
       if (event.button === 0 && view && event.target instanceof Node && view.contains(event.target)) lastPress.current = performance.now();
     };
@@ -190,7 +219,9 @@ export default function QuickEdit({ resource, references = EMPTY, sketch = null,
       if (onCopy?.()) event.preventDefault();
     } else if (event.key === "Enter" && !event.shiftKey && !event.nativeEvent.isComposing) {
       event.preventDefault();
-      run(primary);
+      // Already in the agent's context: Enter just hands the keyboard back to the model.
+      if (agentContext) { target.blur(); target.closest("[data-cad-surface]")?.focus({ preventScroll: true }); }
+      else run(primary);
     } else if (event.key === "Escape") {
       // Back to the model: the viewer's own keys work again. An empty box goes, and the key is the
       // viewer's too; a note is kept, box and all.
@@ -256,6 +287,7 @@ export default function QuickEdit({ resource, references = EMPTY, sketch = null,
           </TooltipHint> : null}
           {referenceCount && sketching ? <span aria-hidden="true">·</span> : null}
           {sketching ? <span data-quick-edit-chip="sketch">drawing</span> : null}
+          {agentContext && attached ? <span className="shrink-0" role="status" data-quick-edit-chip="agent" data-delivered={delivered ? "" : undefined}>{delivered ? "· Sent" : "· Next message"}</span> : null}
         </p>
         <button type="button" aria-label="Close Quick Edit" className={TOOL_PANEL_BUTTON_CLASS} onClick={clearAll}>
           <X className="size-3" aria-hidden="true" />

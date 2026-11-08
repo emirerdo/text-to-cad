@@ -14,6 +14,8 @@ export interface CadEntry {
   [key: string]: unknown;
 }
 export interface CadServerInfo {
+  /** Whether this server keeps what is selected for the person's agent (`CADGEN_AGENT_CONTEXT`). */
+  agentContext?: boolean;
   autoReload?: boolean;
   identityToken?: string;
   /** The folder the server was started in, where a developer's relative `?file=` resolves. */

@@ -30,3 +30,19 @@ export function createQuickEditContext({ resource, references = [], text, sketch
 export function copiedQuickEdit(context, { sketchPath = null } = {}) {
   return formatPromptMessage(context, { attachmentPath: () => sketchPath });
 }
+
+/**
+ * What is selected, as an agent's context holds it: the same message a copy gives, the paths it
+ * names (a server may name them more exactly), and the view to save beside it. Nothing to say is
+ * an empty text.
+ */
+export function agentSelection({ resource, references = [], text = "", picture = null, pictureKey = "" }) {
+  const chosen = quickEditSelection(references);
+  if (!chosen.length && !String(text).trim() && !picture) return { text: "", paths: [], picture: null, pictureKey: "", pictureName: "" };
+  const paths = [resource, ...chosen.map(reference => reference.resource)].filter(item => item.kind === "workspace-file").map(item => item.path);
+  return {
+    text: formatPromptMessage(createQuickEditContext({ resource, references: chosen, text })),
+    paths: [...new Set(paths)], picture, pictureKey,
+    pictureName: `${stem(resource.kind === "url" ? new URL(resource.url).pathname : resource.path)}-pick.png`,
+  };
+}

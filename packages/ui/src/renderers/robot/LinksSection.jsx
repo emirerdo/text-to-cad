@@ -117,7 +117,7 @@ function RobotSearchRow({ match, highlighted, cursor, selection, hiddenIds, onVi
  * @param {(filename: string) => string} [props.meshPath] The host path of a mesh the description names, or "" when it has none here.
  * @param {(path: string) => void} [props.onOpenFile] Opens a file the description names.
  */
-export default function LinksSection({ description = null, components = EMPTY, parts = EMPTY, selection, groupNamesByLink = null, active = true, meshPath = null, onOpenFile = null, hiddenPartIds = EMPTY, onVisibilityChange }) {
+export default function LinksSection({ description = null, components = EMPTY, parts = EMPTY, selection, groupNamesByLink = null, active = true, meshPath = null, onOpenFile = null, hiddenPartIds = EMPTY, onVisibilityChange, headerAction = null }) {
   const hiddenIds = useMemo(() => new Set(hiddenPartIds), [hiddenPartIds]);
   const tree = useMemo(() => buildRobotTree(description, { components, parts }), [description, components, parts]);
   const [userExpanded, setUserExpanded] = useState(null);
@@ -175,7 +175,7 @@ export default function LinksSection({ description = null, components = EMPTY, p
     {/* No heading: the filter is the panel's top row, and stays put while the tree scrolls under it. */}
     {/* Its X closes it, and Select, pressed while it is the tool, opens it again; on a phone it starts closed. */}
     <ToolPanel id="tree" label="Links" fit="tree" resizable closable collapsible={false} hidden={!active}
-      header={<TreeFilterInput dense label="Filter links" placeholder="Filter…" yieldWhileTyping value={query} onChange={changeQuery} onKeyDown={onSearchKeyDown} trailing={<ToolPanelClose/>}/>}>
+      header={<TreeFilterInput dense label="Filter links" placeholder="Filter…" yieldWhileTyping value={query} onChange={changeQuery} onKeyDown={onSearchKeyDown} trailing={<>{headerAction}<ToolPanelClose/></>}/>}>
       <div className="flex flex-col text-tiny" aria-label="Robot links">
         <div ref={listRef} className="px-1 py-1" aria-label="Robot tree area"
           onClick={event => { if (!event.target.closest("li,button,input")) clearSelection(); }}>

@@ -614,6 +614,7 @@ export function buildUrdfVisualParts(urdfData, meshesByUrl) {
       color: visualColor,
       meshUrl,
       partFileRef,
+      filename: String(visual?.filename || ""),
       linkName,
       localTransform: toTransformArray(visual?.localTransform),
       sourceBounds: partMesh.bounds,
